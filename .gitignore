@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+mujoco_menagerie/
+logs/
+backup_original_sac/models/
+**/sac_panda_circle_checkpoint_*.zip
+**/sac_panda_circle_final.zip
+results/smoke*/
+results/**/traces/
+# Keep both existing best checkpoints and final benchmark results versionable.

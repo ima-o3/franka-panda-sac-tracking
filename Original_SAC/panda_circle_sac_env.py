@@ -28,7 +28,7 @@ class PandaCircleSACEnv(gym.Env):
 
     metadata = {"render_modes": ["human"], "render_fps": 60}
 
-    def __init__(self, render_mode=None, max_episode_steps=500):
+    def __init__(self, render_mode=None, max_episode_steps=500, model_path=None):
         super().__init__()
 
         self.model_path = (
@@ -37,6 +37,8 @@ class PandaCircleSACEnv(gym.Env):
             / "franka_emika_panda"
             / "scene.xml"
         )
+        if model_path is not None:
+            self.model_path = Path(model_path).expanduser().resolve()
 
         if not self.model_path.exists():
             raise FileNotFoundError(
