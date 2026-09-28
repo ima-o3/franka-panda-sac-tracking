@@ -1,826 +1,385 @@
-\# Franka Panda SAC End-Effector Tracking in MuJoCo
-
-
-
-This project implements a reinforcement learning controller for 3D end-effector trajectory tracking using a Franka Panda robotic arm in MuJoCo. The main task is to track a circular Cartesian trajectory using a Soft Actor-Critic (SAC) agent, with comparison against a classical Jacobian inverse kinematics baseline.
-
-
-
-The project also introduces uncertainty through observation noise, action noise, and unreachable target trajectories to evaluate the robustness of the learned controller.
-
-
-
-\## Project Overview
-
-
-
-The aim of this project is to control a 7-DOF Franka Panda arm so that its end-effector tracks a moving circular target trajectory in Cartesian space.
-
-
-
-The project includes:
-
-
-
-\* A custom MuJoCo + Gymnasium environment for circular trajectory tracking
-
-\* A classical Jacobian inverse kinematics baseline
-
-\* A Soft Actor-Critic reinforcement learning controller
-
-\* Periodic model evaluation and best-checkpoint selection
-
-\* Robustness testing with observation noise, action noise, and unreachable target positions
-
-\* Tracking error plots and simulation videos
-
-
-
-\## Demo
-
-
-
-Add demo GIFs or videos here.
-
-
-
-Example:
-
-
-
-```markdown
-
-!\[SAC Circular Tracking](results/videos/sac\_tracking.gif)
-
-```
-
-
-
-Or link to videos:
-
-
-
-\* Clean SAC tracking demo: `results/videos/sac\_clean\_tracking.mp4`
-
-\* Disturbed SAC tracking demo: `results/videos/sac\_noisy\_tracking.mp4`
-
-\* Classical IK baseline demo: `results/videos/classical\_ik\_tracking.mp4`
-
-
-
-\## Repository Structure
-
-
-
-```text
-
-franka-panda-sac-tracking/
-
-│
-
-├── circle\_ik\_panda.py
-
-├── panda\_circle\_sac\_env.py
-
-├── train\_sac\_circle.py
-
-├── play\_sac\_circle.py
-
-│
-
-├── Noisy\_SAC/
-
-│   ├── panda\_circle\_sac\_env\_uncertain.py
-
-│   ├── train\_sac\_circle\_uncertain.py
-
-│   └── play\_sac\_circle\_uncertain.py
-
-│
-
-├── Original\_SAC/
-
-│   └── models\_clean/
-
-│       └── best\_model/
-
-│           └── best\_model.zip
-
-│
-
-├── results/
-
-│   ├── plots/
-
-│   └── videos/
-
-│
-
-├── requirements.txt
-
-├── .gitignore
-
-└── README.md
-
-```
-
-
-
-\## Installation
-
-
-
-This project was developed on Windows using Python, MuJoCo, Gymnasium, and Stable-Baselines3.
-
-
-
-\### 1. Clone this repository
-
-
-
-```bash
-
-git clone https://github.com/ima-o3/franka-panda-sac-tracking.git
-
-cd franka-panda-sac-tracking
-
-```
-
-
-
-\### 2. Create and activate a virtual environment
-
-
-
-On Windows PowerShell:
-
-
+# Franka Panda: classical IK vs SAC trajectory tracking
+
+This project asks how a known-model Jacobian controller compares with a learned
+Soft Actor-Critic (SAC) controller on Cartesian tracking, new trajectories and
+uncertainty. It continues the original MuJoCo/Gymnasium project and preserves its
+trained checkpoints and historical results.
+
+The evaluation pipeline is implemented and measured results are included. **A
+verified disturbance-trained checkpoint is not available:** the root best model
+has uncertain provenance and is reported as `candidate_sac`. Its results cannot
+establish the effect of disturbance training. No new training was performed.
+
+## Quick start
+
+Use Python 3.12 and run commands from this directory. From the supplied workspace,
+first `cd franka-panda-sac-tracking-main`. For a standalone clone of this project,
+use its repository root instead.
 
 ```powershell
-
 python -m venv .venv
-
-.\\.venv\\Scripts\\Activate.ps1
-
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements-evaluation-lock.txt
+git clone https://github.com/google-deepmind/mujoco_menagerie.git mujoco_menagerie
+git -C mujoco_menagerie checkout c96a32d28fb5da84da38c1da4d749e7a13212855
+python -m unittest -v test_benchmark
+python evaluate_controllers.py --episodes 5 --seed 42 --duration 20
 ```
 
+On Linux/macOS activate with `source .venv/bin/activate`. Evaluation is headless;
+no viewer or GPU is required. `requirements.txt` lists the tested main packages
+and optional historical-training TensorBoard dependency; the evaluation lock
+records the complete tested package set. The original freeze is preserved as
+`requirements-original.txt`.
 
+Menagerie can also be a sibling directory, or specified explicitly with
+`--model-path /path/to/franka_emika_panda/scene.xml` or `PANDA_MODEL_PATH`.
+The model's external mesh files must remain beside its XML files.
+The two small best checkpoints must be included in a clone:
 
-\### 3. Install dependencies
+- `Original_SAC/models_clean/best_model/best_model.zip`: clean SAC, 640,000 steps.
+- `models/best_model/best_model.zip`: unverified candidate, 160,000 steps.
 
+Missing checkpoints fail explicitly; `--controllers ik` needs no SAC checkpoint.
+Evaluation never trains, changes, or saves a policy. Existing output directories
+are refused; omit `--output` for a unique timestamped directory under `results/`.
 
+## Architecture and audit
 
-```powershell
-
-pip install -r requirements.txt
-
-```
-
-
-
-\### 4. Download MuJoCo Menagerie
-
-
-
-This project uses the Franka Panda model from MuJoCo Menagerie.
-
-
-
-Clone MuJoCo Menagerie so that the folder structure looks like this:
-
-
+See [AUDIT.md](AUDIT.md) for the inspection and limitations of historical scripts.
 
 ```text
-
-mujoco\_projects/
-
-│
-
-├── mujoco\_menagerie/
-
-│   └── franka\_emika\_panda/
-
-│       └── scene.xml
-
-│
-
-└── panda\_tracking\_rl/
-
-&#x20;   └── project files
-
+Original_SAC/                 Original clean environment, training/playback and models
+Noisy_SAC/                    Original uncertain environment and training/playback
+backup_original_sac/          Preserved historical code and checkpoint duplicates
+Testing/                      Earlier 20-input prototype (not compatible with saved SAC)
+circle_ik_panda.py             Preserved original interactive feedforward IK demo
+trajectories.py               Shared circle and smooth assembly position/velocity reference
+benchmark.py                  Shared plant (subclasses clean environment), DLS IK, metrics
+evaluate_controllers.py       Paired rollouts, checkpoint loading, CSVs, traces and manifests
+plot_results.py               Automatic PNG/PDF plots and data-driven report
+summarize_experiments.py       Matched feedback/feedforward comparison table and figure
+assembly_config.json          Editable waypoint offsets, phase weights, circle parameters
+test_benchmark.py             Numerical, Gymnasium and reproducibility checks
+artifact_inventory.json       SHA-256 inventory of 141 preserved historical artifacts
+results/reference/            180 episodes: 2 paths x 6 conditions x 3 controllers x 5 seeds
+results/ik_feedforward/        60 episodes using original IK feedforward law
+results/training_horizon/     3 clean-circle episodes at the original 5-second horizon
+results/comparison/           Combined table and figure
 ```
 
+The new evaluator reuses the clean environment's robot reset, observation layout,
+command integration, joint limits and simulation stepping. The only change to its
+legacy constructor adds an optional XML path. The benchmark subclass refreshes
+kinematics after each step so position errors use the final simulation time,
+fixing the legacy one-physics-step Cartesian sampling lag. Historical demos and
+training scripts are retained as inspected legacy entry points, not validated
+comparison commands. They use cwd-relative output paths and can overwrite shared
+training destinations; use separate working/output directories if adapting them.
 
+## MDP, SAC and reward
 
-Clone Menagerie with:
+The underlying state includes robot positions/velocities, command integrator,
+reference clock and previous action. The existing policy sees 32 float32 values:
 
+| Slice | Input |
+|---|---|
+| 0:7 | Arm joint positions, rad |
+| 7:14 | Arm joint velocities, rad/s |
+| 14:17 | Hand-body origin XYZ, m |
+| 17:20 | Target XYZ, m |
+| 20:23 | Target minus actual XYZ, m |
+| 23:25 | sin(0.5 t), cos(0.5 t) by default |
+| 25:32 | Commanded joint positions, rad |
 
-
-```bash
-
-git clone https://github.com/google-deepmind/mujoco\_menagerie.git
-
-```
-
-
-
-The environment expects the Franka Panda scene file at:
-
-
+The seven normalized actions are clipped to [-1, 1]. Each updates a position
+servo target by `0.04 * action` rad per control step and is then clipped to the
+XML joint limits. This is joint-position-target control, not torque control.
+The reward, using L2 norms and the executed action `a`, is exactly:
 
 ```text
-
-mujoco\_menagerie/franka\_emika\_panda/scene.xml
-
+r = -10 ||target - hand|| - 0.01 ||a|| - 0.02 ||a - previous_a||
+    - 0.001 ||joint_velocity|| + 0.5 * (||target - hand|| < 0.03)
 ```
 
-
-
-\## How to Run
-
-
-
-\### Classical Jacobian IK Baseline
-
-
-
-```powershell
-
-python circle\_ik\_panda.py
-
-```
-
-
-
-This runs a classical kinematic controller that tracks a circular trajectory using the end-effector Jacobian and damped least-squares inverse kinematics.
-
-
-
-\### Train Clean SAC Agent
-
-
-
-```powershell
-
-python train\_sac\_circle.py
-
-```
-
-
-
-This trains a SAC policy on the clean circular tracking task.
-
-
-
-\### Play Clean SAC Agent
-
-
-
-```powershell
-
-python play\_sac\_circle.py
-
-```
-
-
-
-This loads the best trained clean SAC policy and renders it in the MuJoCo viewer.
-
-
-
-\### Train SAC Agent with Disturbances
-
-
-
-```powershell
-
-python Noisy\_SAC/train\_sac\_circle\_uncertain.py
-
-```
-
-
-
-This trains a SAC policy with observation noise, action noise, and probabilistic unreachable target episodes.
-
-
-
-\### Play SAC Agent with Disturbances
-
-
-
-```powershell
-
-python Noisy\_SAC/play\_sac\_circle\_uncertain.py
-
-```
-
-
-
-This evaluates the disturbed SAC policy in the MuJoCo viewer.
-
-
-
-\## Task Formulation
-
-
-
-The task is formulated as a continuous-control Markov Decision Process.
-
-
-
-\### State / Observation
-
-
-
-The policy observes:
-
-
-
-\* 7 Panda joint positions
-
-\* 7 Panda joint velocities
-
-\* 3D end-effector position
-
-\* 3D target position
-
-\* 3D Cartesian tracking error
-
-\* Circular trajectory phase as sine and cosine features
-
-\* Current commanded joint targets
-
-
-
-The observation vector has dimension 32.
-
-
-
-\### Action
-
-
-
-The action is a 7D continuous vector in the range:
-
-
+There is no error clipping or additional 5/8 cm reward bonus in the supplied code.
+Previous action is not itself an observation, so the observation is not the full
+Markov state for reward accounting. Observation noise and unseen trajectories
+introduce further partial observability.
+
+[SAC](https://arxiv.org/abs/1801.01290) is an off-policy, entropy-regularized
+actor-critic method. The original scripts use SB3 `MlpPolicy`, learning rate
+3e-4, replay capacity 200,000, batch size 256, gamma .99, tau .005, automatic
+entropy coefficient, 5,000 warmup steps and one gradient step per interaction.
+They request 1M training steps and evaluate every 10,000 steps. The saved policies
+use the default 256-by-256 MLPs and deterministic inference for this benchmark.
+Training seeds and exact historical model-asset revision are not recorded.
+
+## Classical IK
+
+The baseline reuses the original damped least-squares law:
 
 ```text
-
-\[-1, 1]
-
+v = kp * measured_position_error [+ target_velocity for feedforward run]
+dq = J.T @ solve(J @ J.T + damping**2 * I, v)
+q_command += clip(dq, -1, 1) * control_dt
 ```
 
+`kp=4 /s`, damping=.05, Cartesian speed cap=.35 m/s and internal per-joint command
+velocity cap=1 rad/s are retained from the original demo. The controller computes
+the hand's translational Jacobian at measured joint positions using a separate
+MuJoCo scratch state. It does not get privileged true joint positions/error under
+observation noise. Orientation is unconstrained, as for SAC.
+
+The default `ik` evaluation omits feedforward because SAC has no target-velocity
+input. The separate `--ik-feedforward` run restores the original controller's
+analytic reference velocity, including on assembly segments. Both are reported:
+SAC has phase features from which circle velocity can be inferred, so removing
+IK feedforward is an ablation, not proof of equal information. The feedforward
+run uses known reference motion; it is the relevant engineering baseline when
+that reference is available. IK's internal 1 rad/s cap is a controller choice;
+all methods face the same plant action envelope (up to .04 rad/step = 4 rad/s of
+command change). There is no common hard cap on actual measured joint speed.
+
+## Shared trajectories
+
+The circle has radius .08 m and angular speed .5 rad/s. Its centre is offset
+-.08 m in X from the initial hand origin, so it starts without a target jump.
+The default 20-second episode covers approximately 1.6 revolutions.
+
+The assembly-inspired path is a **position tracking experiment only**. It has no
+grasp, component, fixture contact, insertion forces or orientation objective.
+Eleven phases are home, approach pick, descend, dwell, lift, transfer, approach
+insertion, slower insertion descent, dwell, retract and return home. Each segment
+uses `10u^3 - 15u^4 + 6u^5`, with zero velocity/acceleration at both ends. Dwell
+segments hold position. Default phase weights sum to 25 and scale to the requested
+episode duration; insertion lasts twice as long as pickup descent.
+
+Offsets are relative to the home hand position. With the pinned model, the path
+lies within X=[.203,.323], Y=[-.100,.100], Z=[.634,.764] m. This is a small free-space
+trajectory, not a validation of the Panda's whole workspace. Edit
+[assembly_config.json](assembly_config.json) and pass `--trajectory-config` to
+change offsets, clearance, phase durations, radius or frequency. Shortening the
+assembly duration also increases reference speed; the .2-second smoke test checks
+execution only and is not a meaningful tracking benchmark.
+
+## Experimental methodology and uncertainty
+
+All methods use the same home q=[0,-.7,0,-2,0,1.6,.7], finger initialization,
+model, XML limits, .002-second physics timestep, frame skip 5, .01-second control
+interval, trajectories and full episode duration. Metrics are sampled after
+physics, including initial transients. Reference values are true/noiseless for
+scoring. SAC inference runs on CPU with one Torch thread.
+
+| Condition | Observation noise | Normalized action noise | Target |
+|---|---:|---:|---|
+| clean | 0 | 0 | reachable reference |
+| observation_noise | .002 | 0 | reachable reference |
+| action_noise | 0 | .05 | reachable reference |
+| noise | .002 | .05 | reachable reference |
+| unreachable | 0 | 0 | translated far reference |
+| stress | .002 | .05 | far reference with .03 m episode jitter |
+
+Noise is independent zero-mean Gaussian. Like the original uncertain environment,
+the same numeric observation standard deviation applies to all 32 mixed-unit
+entries; errors and positions are perturbed independently. This is a synthetic
+robustness test, not a calibrated sensor model. Action noise is applied before the
+shared clipping/integration, so equal normalized std .05 corresponds to .002 rad
+command-increment std before clipping. Clipping can cause different effective
+noise for saturated policies.
+
+Unreachable circles are centred at [1.05,0,.45] m; assembly gets the same translation.
+Stress jitter is sampled once per episode. The original trainer used 20% unreachable
+episodes; evaluation separates reachable and far-target conditions instead of
+mixing them and hiding failure in an average. Far-target status is a designed test,
+not a solved global reachability certificate. Seeds 42-46 are paired across
+controllers, with separate target, observation and action RNG streams. Deterministic
+clean/unreachable runs repeat identically; five copies are not five independent
+training runs. SD summarizes episode variability, not statistical significance.
+
+### Metrics and files
+
+Each run saves `episodes.csv`, `summary.csv`, `manifest.json`, `report.md`, `traces/*.npz`
+and `plots/*.png` plus vector PDFs. The manifest records source/model/asset hashes,
+packages, seed, configuration, timestep and checkpoint training-step metadata.
+Raw traces include target/actual XYZ, phase, joint positions, commands and raw/executed
+actions so post-processing can be checked without running the simulator again.
+The approximately 140 MB of full-run traces are preserved locally but excluded
+from Git; rerun evaluation to regenerate them in a clean clone. CSV summaries,
+reports, manifests, plots and both best checkpoints remain versionable.
+
+Tracking metrics are mean error, RMSE, maximum, 95th percentile, fractions below
+3 and 5 cm, and closest achieved distance. Smoothness includes mean L2 action
+change, command change and command second difference. Speed is the L2 norm across
+seven joint velocities (not an individual-joint average). Joint/command limit
+occupancy is the fraction of joint-time samples within .01 rad of either limit
+or beyond it. Action clipping is the fraction of noisy action components outside
+[-1,1] before clipping; it is not policy saturation. SAC reward totals use the
+same reward formula. Inference timings exclude physics and I/O and include Python
+overhead; concurrent benchmark runs make them approximate, not a hardware study.
+Summary values are means of episode metrics, with sample SD; e.g. averaged maxima
+are not the single worst sample across all episodes. Closest distance is an
+instantaneous minimum to the moving target, not an optimization-based reachability
+bound. No single metric alone establishes stability or safety.
+
+## Measured results
+
+Generated from `results/reference/summary.csv` and `results/ik_feedforward/summary.csv`
+using `python summarize_experiments.py`. These are evaluation results for the
+supplied weights, not estimates of SAC training-seed variability.
+
+| Trajectory | Condition | IK feedback | IK + feedforward | Clean SAC | SAC candidate* |
+|---|---|---:|---:|---:|---:|
+| circle | clean | 1.00 ± 0.00 | 0.06 ± 0.00 | 0.17 ± 0.00 | 3.55 ± 0.00 |
+| circle | observation_noise | 1.00 ± 0.00 | 0.07 ± 0.00 | 0.31 ± 0.01 | 3.43 ± 0.05 |
+| circle | action_noise | 1.15 ± 0.04 | 0.57 ± 0.05 | 0.18 ± 0.01 | 3.47 ± 0.05 |
+| circle | noise | 1.14 ± 0.04 | 0.57 ± 0.04 | 0.31 ± 0.01 | 3.63 ± 0.11 |
+| circle | unreachable | 22.32 ± 0.00 | 22.29 ± 0.00 | 45.70 ± 0.00 | 28.46 ± 0.00 |
+| circle | stress | 20.71 ± 3.22 | 20.69 ± 3.22 | 44.99 ± 2.09 | 28.28 ± 4.98 |
+| assembly | clean | 1.07 ± 0.00 | 0.18 ± 0.00 | 0.79 ± 0.00 | 6.94 ± 0.00 |
+| assembly | observation_noise | 1.08 ± 0.00 | 0.19 ± 0.00 | 0.86 ± 0.00 | 6.95 ± 0.01 |
+| assembly | action_noise | 1.29 ± 0.05 | 0.59 ± 0.06 | 0.80 ± 0.01 | 6.94 ± 0.02 |
+| assembly | noise | 1.29 ± 0.05 | 0.59 ± 0.06 | 0.87 ± 0.01 | 6.95 ± 0.02 |
+| assembly | unreachable | 22.13 ± 0.00 | 22.05 ± 0.00 | 43.53 ± 0.00 | 28.53 ± 0.00 |
+| assembly | stress | 20.53 ± 3.22 | 20.44 ± 3.22 | 42.71 ± 2.25 | 25.96 ± 4.84 |
+
+Mean Cartesian error in cm ± sample SD across episode means. *Training provenance unverified.
+Assembly SAC is zero-shot; IK feedforward receives analytic reference velocity.
 
 
-Each action represents an incremental update to the commanded joint position targets of the Panda arm.
+![Clean tracking comparison](results/comparison/clean_comparison.png)
 
+The top panels show XY projections; vertical segments overlap there. Full XYZ
+plots and time histories are available in each run's plots directory.
 
+![Assembly uncertainty comparison, feedback IK](results/reference/plots/assembly_performance.png)
+![Assembly command smoothness, feedback IK](results/reference/plots/assembly_smoothness.png)
 
-The action is scaled before being applied:
+[Full metrics and generated observations](results/reference/report.md) ·
+[Feedforward metrics](results/ik_feedforward/summary.csv) ·
+[All per-episode metrics](results/reference/episodes.csv)
 
+## Engineering interpretation
 
+For the 20-second clean paths, IK with feedforward gives the lowest mean error
+(circle .06 cm, assembly .18 cm), requires no learned policy, and produces smoother
+commands than the saved SAC controllers. Feedback-only IK has approximately 1 cm
+lag; clean SAC beats that ablation on both paths. This demonstrates why the
+controller's reference information must be stated when claiming an advantage.
 
-```text
+Clean SAC is especially strong on its original 5-second clean-circle horizon:
+mean error is .018 cm in [that separate run](results/training_horizon/summary.csv),
+versus .17 cm over 20 seconds. The full-horizon candidate error rises from .54 cm
+at 5 seconds to 3.55 cm at 20 seconds. Longer rollouts probe time/phase coverage
+beyond the original training horizon, even on the same circle. On the 20-second
+circle with action noise, clean SAC (.18 cm) beats feedforward IK (.57 cm); on noisy
+assembly, feedforward IK (.59 cm) beats clean SAC (.87 cm). Robustness is task- and
+noise-dependent, not a universal ranking.
 
-q\_cmd = q\_cmd + action \* action\_scale
+Circle-trained clean SAC tracks the assembly reference at .79 cm mean error and
+stays within 3 cm throughout this clean test, showing useful local zero-shot
+transfer. That does not make it an assembly-trained policy. Its phase features
+retain their circle meaning, it sees no future waypoint/phase label or desired
+velocity, and a circle-only training distribution does not identify the dynamics
+of arbitrary target motion. The assembly reference is close to home; success here
+does not imply generalization over the full workspace or manipulation tasks.
 
+For infeasible circular targets, feedback IK has mean error 22.32 cm, no measured
+joint-limit occupancy, and mean joint-speed norm .164 rad/s. Clean SAC has 45.70 cm
+mean error, 54.37% joint-limit occupancy and .578 rad/s mean speed norm; its peak
+speed norm is 8.44 rad/s. The candidate is closer (28.46 cm) than clean SAC and has
+6.83% limit occupancy, but is more active (1.389 rad/s mean speed norm). In the same
+test, mean command second differences are approximately .00004, .00185 and .00803
+rad/step² for IK, clean SAC and candidate respectively. Thus a lower distance alone
+would hide aggressive command behaviour. These are descriptive stability indicators,
+not a proof of stability or a real-robot safety validation.
+
+The candidate shows poorer nominal accuracy and better far-target distance than
+clean SAC, but **this cannot be attributed to disturbance training**. Its training
+provenance is unknown, it has a different training-step count, and only one policy
+of each type is present. A verified checkpoint can be evaluated without changing
+the pipeline; matched multi-seed training would be needed for causal robustness
+claims.
+
+On this runtime, mean inference is roughly .07-.09 ms for IK and .27-.30 ms for
+SAC. Both are small relative to the 10 ms control interval; these timings are
+approximate. SAC also incurred at least the interactions recorded in its checkpoint
+(640k clean; 160k candidate), while IK requires no training. Historical wall-clock
+training cost was not measured reliably here, so no hours/GPU-cost claim is made.
+
+For these known-kinematics free-space paths, the measured accuracy, smoothness and
+absence of training cost make feedforward DLS a strong engineering starting point.
+SAC remains interesting when optimizing objectives or dynamics that are hard to
+encode analytically, including learned residual compensation or contact-rich
+objectives. Those possibilities are future hypotheses, not benefits demonstrated
+by this position-only experiment.
+
+## Reproducing each experiment
+
+A minimal all-controller smoke test creates metrics and plots quickly:
+
+```powershell
+python evaluate_controllers.py --episodes 1 --duration 0.2 --conditions clean stress
 ```
 
+Full benchmark (both paths; all six conditions):
 
-
-\### Transition Dynamics
-
-
-
-The transition dynamics are provided by MuJoCo. At every environment step, the selected action updates the joint target command, MuJoCo advances the simulation, and the next observation is returned.
-
-
-
-\### Reward
-
-
-
-The reward is designed to encourage accurate Cartesian tracking while discouraging aggressive or unstable motion.
-
-
-
-The reward includes:
-
-
-
-\* Cartesian tracking error penalty
-
-\* Action effort penalty
-
-\* Action change penalty
-
-\* Joint velocity penalty
-
-\* Bonuses for accurate tracking thresholds
-
-
-
-The reward structure is:
-
-
-
-```python
-
-reward\_error = min(tracking\_error, 0.50)
-
-
-
-reward = (
-
-&#x20;   -10.0 \* reward\_error
-
-&#x20;   -0.01 \* action\_effort
-
-&#x20;   -0.02 \* action\_change
-
-&#x20;   -0.001 \* joint\_speed
-
-)
-
-
-
-if tracking\_error < 0.08:
-
-&#x20;   reward += 0.2
-
-
-
-if tracking\_error < 0.05:
-
-&#x20;   reward += 0.5
-
-
-
-if tracking\_error < 0.03:
-
-&#x20;   reward += 1.0
-
+```powershell
+python evaluate_controllers.py --episodes 5 --seed 42 --duration 20 --output results/my_reference
+python evaluate_controllers.py --controllers ik --ik-feedforward --episodes 5 --seed 42 --duration 20 --output results/my_feedforward
+python summarize_experiments.py --reference results/my_reference --feedforward results/my_feedforward --output results/my_comparison
 ```
 
+Individual experiments:
 
-
-The tracking error is clipped in the reward for disturbed environments so that unreachable target episodes do not dominate training too aggressively.
-
-
-
-\## Reinforcement Learning Method
-
-
-
-The RL controller uses Soft Actor-Critic (SAC), an off-policy actor-critic algorithm for continuous action spaces.
-
-
-
-SAC was selected because:
-
-
-
-\* The Panda arm requires continuous joint-space control
-
-\* SAC handles continuous actions naturally
-
-\* It encourages exploration through entropy maximisation
-
-\* It is sample-efficient compared with many on-policy methods
-
-\* It is commonly used for robotic control problems
-
-
-
-The model is trained using Stable-Baselines3.
-
-
-
-During training, periodic evaluation is used to save the best model checkpoint. The final policy is not assumed to be the best policy, because RL performance can fluctuate during training.
-
-
-
-\## Classical IK Baseline
-
-
-
-A classical Jacobian inverse kinematics controller is implemented as a baseline.
-
-
-
-The controller computes the desired end-effector velocity from the target circular trajectory and tracking error, then converts this Cartesian velocity into joint velocities using damped least-squares inverse kinematics:
-
-
-
-```text
-
-dq = Jᵀ (J Jᵀ + λ²I)⁻¹ v\_des
-
+```powershell
+python evaluate_controllers.py --trajectories circle --conditions clean --duration 5 --episodes 1
+python evaluate_controllers.py --trajectories assembly --conditions clean --trajectory-config assembly_config.json
+python evaluate_controllers.py --conditions observation_noise action_noise noise --obs-std 0.002 --action-std 0.05
+python evaluate_controllers.py --conditions unreachable stress --episodes 10 --seed 100
+python evaluate_controllers.py --controllers ik --ik-feedforward
 ```
 
+Once training provenance is verified, evaluate a disturbance-trained checkpoint:
 
-
-This provides a non-learning baseline for comparing the SAC policy against classical robotics control.
-
-
-
-\## Disturbance and Robustness Testing
-
-
-
-To evaluate robustness, the disturbed environment introduces three uncertainty sources.
-
-
-
-\### Observation Noise
-
-
-
-Gaussian noise is added to the observation received by the policy. This simulates imperfect sensing.
-
-
-
-The true MuJoCo state is not changed; only the policy input is perturbed.
-
-
-
-\### Action Noise
-
-
-
-Gaussian noise is added to the action before execution. This simulates imperfect actuation or low-level control error.
-
-
-
-The policy outputs a raw action, but the environment applies a noisy executed action.
-
-
-
-\### Unreachable Target Episodes
-
-
-
-Some episodes place the circular target outside the normal reachable workspace of the Panda arm.
-
-
-
-This tests whether the controller can remain stable when perfect tracking is impossible.
-
-
-
-The environment can be configured with:
-
-
-
-```python
-
-observation\_noise\_std=0.002
-
-action\_noise\_std=0.05
-
-unreachable\_prob=0.20
-
-unreachable\_jitter\_std=0.03
-
+```powershell
+python evaluate_controllers.py --controllers ik clean_sac disturbed_sac --disturbed-model path/to/verified_best_model.zip
 ```
 
-
-
-\## Experiments
-
-
-
-The following experiments were performed:
-
-
-
-| Experiment    | Description                                                               |
-
-| ------------- | ------------------------------------------------------------------------- |
-
-| Random Policy | Sanity check with random actions                                          |
-
-| Classical IK  | Jacobian inverse kinematics baseline                                      |
-
-| Clean SAC     | SAC trained on reachable circular tracking                                |
-
-| Disturbed SAC | SAC trained with observation noise, action noise, and unreachable targets |
-
-| Stress Test   | Evaluation under combined uncertainty                                     |
-
-
-
-\## Results
-
-
-
-Add your final results table here.
-
-
-
-Example format:
-
-
-
-| Controller    | Mean Tracking Error \[m] | Final Tracking Error \[m] | Max Tracking Error \[m] | Notes                                         |
-
-| ------------- | ----------------------: | -----------------------: | ---------------------: | --------------------------------------------- |
-
-| Random Policy |                     TBD |                      TBD |                    TBD | Poor tracking sanity check                    |
-
-| Classical IK  |                     TBD |                      TBD |                    TBD | Smooth kinematic baseline                     |
-
-| Clean SAC     |                     TBD |                      TBD |                    TBD | Best checkpoint selected by evaluation reward |
-
-| Disturbed SAC |                     TBD |                      TBD |                    TBD | Trained with noise and unreachable episodes   |
-
-
-
-\## Example Plots
-
-
-
-Add plots here:
-
-
-
-```markdown
-
-!\[Tracking Error](results/plots/tracking\_error.png)
-
-!\[XY Trajectory](results/plots/xy\_trajectory.png)
-
-```
-
-
-
-Suggested plots:
-
-
-
-\* Target vs actual end-effector XY path
-
-\* Tracking error over time
-
-\* Clean SAC vs disturbed SAC comparison
-
-\* Classical IK vs SAC tracking comparison
-
-
-
-\## Key Design Decisions
-
-
-
-\### Why MuJoCo?
-
-
-
-MuJoCo provides fast rigid-body simulation, stable contact/dynamics modelling, and standard support for robot learning environments.
-
-
-
-\### Why Franka Panda?
-
-
-
-The Franka Panda is a widely used 7-DOF robotic arm in manipulation and control research. Its redundancy makes it suitable for trajectory tracking and continuous-control experiments.
-
-
-
-\### Why SAC?
-
-
-
-SAC is well-suited to continuous action spaces and robotic control. It learns a stochastic policy during training but can be evaluated deterministically.
-
-
-
-\### Why use best-checkpoint selection?
-
-
-
-RL performance is not guaranteed to improve monotonically. In this project, the best-performing policy during training was selected using periodic evaluation rather than assuming the final checkpoint was optimal.
-
-
-
-\### Why include a classical IK baseline?
-
-
-
-The IK controller provides a robotics-based reference point. Comparing SAC against IK helps distinguish learning performance from basic task feasibility.
-
-
-
-\### Why add uncertainty?
-
-
-
-Real robotic systems involve imperfect sensing, imperfect actuation, and infeasible commands. Adding uncertainty makes the task more realistic and tests whether the learned policy remains stable under disturbances.
-
-
-
-\## Limitations
-
-
-
-Current limitations include:
-
-
-
-\* The policy controls joint position targets rather than torques
-
-\* The task currently focuses on position tracking, not full pose/orientation tracking
-
-\* The unreachable target handling is simplified
-
-\* The disturbance model is basic Gaussian noise rather than a full sensor/actuator model
-
-\* Training is performed entirely in simulation
-
-\* The reward function requires manual tuning
-
-
-
-\## Future Work
-
-
-
-Potential extensions include:
-
-
-
-\* Add end-effector orientation tracking
-
-\* Add control delay
-
-\* Add domain randomisation
-
-\* Compare SAC with PPO or TD3
-
-\* Train with curriculum learning
-
-\* Evaluate across multiple random seeds
-
-\* Add obstacle avoidance
-
-\* Use torque-level control
-
-\* Improve reward shaping for unreachable targets
-
-\* Export cleaner evaluation videos and GIFs
-
-
-
-\## Requirements
-
-
-
-Main Python packages:
-
-
-
-```text
-
-mujoco
-
-gymnasium
-
-stable-baselines3
-
-numpy
-
-matplotlib
-
-tensorboard
-
-pandas
-
-```
-
-
-
-Install with:
-
-
-
-```bash
-
-pip install -r requirements.txt
-
-```
-
-
-
-\## Author
-
-
-
-Idris Muzaffar Ariff
-
-MSc Advanced Mechanical Engineering
-
-Imperial College London
-
-
-
+The evaluator requires that explicit path and never relabels the candidate silently.
+The report and plots then show clean vs disturbance-trained SAC. Changing `--seed`,
+`--episodes`, `--duration`, `--frame-skip` or trajectory configuration starts a new
+experiment; changed control timing also changes SAC's effective action rate, so
+keep the trained frame skip for the reported comparison.
+
+## Validation, limitations and future work
+
+Five tests pass: legacy circle equivalence; assembly position/velocity continuity;
+seeded rollout equality, limits and duration; Gymnasium observation/step contract
+and synchronized Cartesian state; paired target/action noise and metric consistency.
+The smoke test exercised checkpoint loading, both paths, disturbances, reports and
+plots. There are 243 full/supplementary recorded episodes, plus 12 smoke episodes.
+All 141 original checkpoint/result artifacts were verified against the supplied ZIP.
+
+Limitations include no orientation or physical assembly objective, known-model IK,
+synthetic mixed-unit noise, no actuator delay/model mismatch, only two saved policy
+instances, unknown candidate provenance, no training-seed study, and a current
+Menagerie/runtime rather than the unrecoverable original runtime. Joint-limit
+clipping is not a safety controller. The phase-conditioned observation does not
+fully describe unseen waypoint motion. No long training was launched.
+
+Future work: recover verified disturbance-training provenance; run matched training
+seeds; validate a short assembly-training smoke test before any long training;
+sample diverse waypoint trajectories with target velocity/phase context; add
+orientation, delays/model error and contact objectives; compare residual SAC with
+IK; validate a hold/stop policy for infeasible commands.
+
+Demo placeholders (no videos are claimed to exist): clean circle GIF, assembly
+tracking video and unreachable-target comparison video. Historical PNG figures
+remain in the original folders; final benchmark plots live under `results/`.
+
+Robot assets: [Google DeepMind MuJoCo Menagerie](https://github.com/google-deepmind/mujoco_menagerie),
+revision `c96a32d28fb5da84da38c1da4d749e7a13212855` for these measurements.
+
+Original project author: Idris Muzaffar Ariff, MSc Advanced Mechanical Engineering,
+Imperial College London.
